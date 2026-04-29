@@ -70,7 +70,11 @@ const userSchema = new mongoose.Schema({
     type: String,
     required: function() { return this.userType === 'supplier'; },
   },
-  businessDescription: String,
+  businessDescription: { type: String, default: '' },
+  // Products / services the supplier offers (free-form list).
+  productsOffered: { type: [String], default: [] },
+  // Years the business has been operating.
+  yearsInBusiness: { type: Number, default: 0 },
   gstNumber: {
     type: String,
     default: '',
@@ -99,7 +103,8 @@ const userSchema = new mongoose.Schema({
     enum: ['pending', 'submitted', 'approved', 'rejected'],
     default: 'pending',
   },
-  // Uploaded KYC document (PDF) — admin views this to approve/reject.
+  // Uploaded KYC document (PDF) — legacy single-file slot, kept for
+  // backward-compat with earlier mobile clients.
   kycDocument: {
     url: { type: String, default: '' },
     publicId: { type: String, default: '' },
@@ -107,6 +112,43 @@ const userSchema = new mongoose.Schema({
     mimeType: { type: String, default: '' },
     size: { type: Number, default: 0 },
     uploadedAt: Date,
+  },
+  // Multi-document KYC: PAN (required), Aadhaar (optional),
+  // Bank Proof (required), GST/Business licence (recommended).
+  // Admin reviews each slot individually before approving the vendor.
+  kycDocuments: {
+    pan: {
+      url: { type: String, default: '' },
+      publicId: { type: String, default: '' },
+      filename: { type: String, default: '' },
+      mimeType: { type: String, default: '' },
+      size: { type: Number, default: 0 },
+      uploadedAt: Date,
+    },
+    aadhaar: {
+      url: { type: String, default: '' },
+      publicId: { type: String, default: '' },
+      filename: { type: String, default: '' },
+      mimeType: { type: String, default: '' },
+      size: { type: Number, default: 0 },
+      uploadedAt: Date,
+    },
+    bankProof: {
+      url: { type: String, default: '' },
+      publicId: { type: String, default: '' },
+      filename: { type: String, default: '' },
+      mimeType: { type: String, default: '' },
+      size: { type: Number, default: 0 },
+      uploadedAt: Date,
+    },
+    gst: {
+      url: { type: String, default: '' },
+      publicId: { type: String, default: '' },
+      filename: { type: String, default: '' },
+      mimeType: { type: String, default: '' },
+      size: { type: Number, default: 0 },
+      uploadedAt: Date,
+    },
   },
   kycSubmittedAt: Date,
   kycApprovedAt: Date,

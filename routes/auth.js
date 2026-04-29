@@ -233,6 +233,115 @@ router.post('/kyc-document', protect, uploadKyc.single('document'), async (req, 
   }
 });
 
+// @route   POST /api/auth/kyc-documents
+// @desc    Upload multi-slot KYC documents (PAN/Aadhaar/BankProof/GST)
+//          along with business description, products offered, years in
+//          business. Admin reviews each document separately before
+//          approving the vendor account.
+const kycDocsFields = uploadKyc.fields([
+  { name: 'pan', maxCount: 1 },
+  { name: 'aadhaar', maxCount: 1 },
+  { name: 'bankProof', maxCount: 1 },
+  { name: 'gst', maxCount: 1 },
+]);
+
+router.post('/kyc-documents', protect, kycDocsFields, async (req, res) => {
+  try {
+    const user = req.user;
+    if (user.userType !== 'supplier') {
+      return res.status(400).json({ success: false, message: 'Only suppliers can upload KYC documents' });
+    }
+
+    const files = req.files || {};
+    const buildDoc = (file) => {
+      if (!file) return null;
+      return {
+        url: resolveKycUrl(req, file),
+        publicId: file.filename || file.public_id || '',
+        filename: file.originalname || file.filename || '',
+        mimeType: file.mimetype || '',
+        size: file.size || 0,
+        uploadedAt: new Date(),
+      };
+    };
+
+    const existing = await User.findById(user.id).select('kycDocuments');
+    const current = (existing && existing.kycDocuments) || {};
+    const kycDocuments = {
+      pan: buildDoc(files.pan && files.pan[0]) || current.pan || undefined,
+      aadhaar: buildDoc(files.aadhaar && files.aadhaar[0]) || current.aadhaar || undefined,
+      bankProof: buildDoc(files.bankProof && files.bankProof[0]) || current.bankProof || undefined,
+      gst: buildDoc(files.gst && files.gst[0]) || current.gst || undefined,
+    };
+
+    // Required: PAN + BankProof (aadhaar optional, gst recommended).
+    if (!kycDocuments.pan || !kycDocuments.pan.url) {
+      return res.status(400).json({ success: false, message: 'PAN Card is required.' });
+    }
+    if (!kycDocuments.bankProof || !kycDocuments.bankProof.url) {
+      return res.status(400).json({ success: false, message: 'Bank Proof is required.' });
+    }
+
+    // Parse business detail fields from multipart body.
+    const {
+      businessName,
+      businessDescription,
+      productsOffered,
+      yearsInBusiness,
+      gstNumber,
+      panNumber,
+    } = req.body || {};
+
+    let productsList = [];
+    if (Array.isArray(productsOffered)) productsList = productsOffered;
+    else if (typeof productsOffered === 'string' && productsOffered.length) {
+      try {
+        const parsed = JSON.parse(productsOffered);
+        productsList = Array.isArray(parsed)
+          ? parsed
+          : productsOffered.split(',').map((s) => s.trim()).filter(Boolean);
+      } catch {
+        productsList = productsOffered.split(',').map((s) => s.trim()).filter(Boolean);
+      }
+    }
+
+    const updates = {
+      kycDocuments,
+      kycStatus: 'submitted',
+      kycSubmittedAt: new Date(),
+      // Mirror the primary document (PAN) into legacy kycDocument for old admin views.
+      kycDocument: kycDocuments.pan,
+    };
+    if (businessName !== undefined) updates.businessName = businessName;
+    if (businessDescription !== undefined) updates.businessDescription = businessDescription;
+    if (productsList.length) updates.productsOffered = productsList;
+    if (yearsInBusiness !== undefined && yearsInBusiness !== '') {
+      const y = Number(yearsInBusiness);
+      if (!Number.isNaN(y)) updates.yearsInBusiness = y;
+    }
+    if (gstNumber !== undefined) updates.gstNumber = gstNumber;
+    if (panNumber !== undefined) updates.panNumber = panNumber;
+
+    const updated = await User.findByIdAndUpdate(
+      user.id,
+      { $set: updates },
+      { new: true }
+    ).select('-password');
+
+    res.json({
+      success: true,
+      message: 'KYC documents uploaded. Awaiting admin review.',
+      kycDocuments: updated.kycDocuments,
+      kycStatus: updated.kycStatus,
+      businessDescription: updated.businessDescription,
+      productsOffered: updated.productsOffered,
+      yearsInBusiness: updated.yearsInBusiness,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message || 'Upload error' });
+  }
+});
+
 // @route   PUT /api/auth/kyc
 // @desc    Submit/update KYC details (suppliers only)
 router.put('/kyc', protect, async (req, res) => {
