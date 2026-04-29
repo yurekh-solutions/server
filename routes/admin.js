@@ -16,6 +16,11 @@ const User = require('../models/User');
 const Equipment = require('../models/Equipment');
 const Order = require('../models/Order');
 const Inquiry = require('../models/Inquiry');
+const Notification = require('../models/Notification');
+const {
+  sendKycApprovalEmail,
+  sendKycRejectionEmail,
+} = require('../services/emailService');
 
 router.use(adminAuth);
 
@@ -749,6 +754,20 @@ router.put('/vendors/:id/approve', async (req, res) => {
       { new: true }
     ).select('-password');
     if (!vendor) return res.status(404).json({ message: 'Vendor not found' });
+
+    // Create in-app notification
+    await Notification.create({
+      userId: vendor._id,
+      type: 'system',
+      title: 'KYC Approved ✅',
+      message: `Congratulations! Your business "${vendor.businessName}" has been verified. You can now log in and start adding equipment.`,
+    });
+
+    // Send approval email
+    sendKycApprovalEmail(vendor.email, vendor).catch(err => {
+      console.error('Failed to send KYC approval email:', err);
+    });
+
     res.json({ success: true, message: 'Vendor approved', vendor });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
@@ -772,6 +791,20 @@ router.put('/vendors/:id/reject', async (req, res) => {
       { new: true }
     ).select('-password');
     if (!vendor) return res.status(404).json({ message: 'Vendor not found' });
+
+    // Create in-app notification
+    await Notification.create({
+      userId: vendor._id,
+      type: 'system',
+      title: 'KYC Rejection ❌',
+      message: reason || 'Your KYC application was rejected. Please contact support for more details.',
+    });
+
+    // Send rejection email
+    sendKycRejectionEmail(vendor.email, vendor, reason).catch(err => {
+      console.error('Failed to send KYC rejection email:', err);
+    });
+
     res.json({ success: true, message: 'Vendor rejected', vendor });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });

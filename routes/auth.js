@@ -3,8 +3,10 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const User = require('../models/User');
+const Notification = require('../models/Notification');
 const { protect } = require('../middleware/auth');
 const { uploadKyc, resolveKycUrl } = require('../middleware/upload');
+const { sendKycSubmissionNotification } = require('../services/emailService');
 
 // Generate JWT Token
 const generateToken = (id) => {
@@ -329,6 +331,24 @@ router.post('/kyc-documents', protect, kycDocsFields, async (req, res) => {
       { $set: updates },
       { new: true }
     ).select('-password');
+
+    // Create in-app notification for vendor
+    await Notification.create({
+      userId: user.id,
+      type: 'system',
+      title: 'KYC Submitted 📋',
+      message: 'Your KYC documents have been submitted successfully. Our team will review them within 24-48 hours.',
+    });
+
+    // Notify admin about new KYC submission (send to all admin emails)
+    const adminEmails = process.env.ADMIN_EMAILS ? process.env.ADMIN_EMAILS.split(',') : [];
+    if (adminEmails.length > 0) {
+      adminEmails.forEach(email => {
+        sendKycSubmissionNotification(email.trim(), updated).catch(err => {
+          console.error('Failed to notify admin:', err);
+        });
+      });
+    }
 
     res.json({
       success: true,
