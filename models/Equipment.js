@@ -80,6 +80,11 @@ const equipmentSchema = new mongoose.Schema({
     min: 0,
     max: 5,
   },
+  // Featured listing (admin controlled)
+  isFeatured: {
+    type: Boolean,
+    default: false,
+  },
   // Timestamps
   createdAt: {
     type: Date,

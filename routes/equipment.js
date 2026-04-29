@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Equipment = require('../models/Equipment');
 const { protect, authorize } = require('../middleware/auth');
+const adminAuth = require('../middleware/adminAuth');
 
 // @route   GET /api/equipment
 // @desc    Get all equipment with filters
@@ -36,6 +37,22 @@ router.get('/', async (req, res) => {
       count: equipment.length,
       equipment,
     });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message,
+    });
+  }
+});
+
+// @route   GET /api/equipment/mine
+// @desc    Get equipment owned by the logged-in supplier
+// NOTE: must be registered BEFORE '/:id' so 'mine' is not captured as an id.
+router.get('/mine', protect, authorize('supplier'), async (req, res) => {
+  try {
+    const items = await Equipment.find({ supplierId: req.user.id }).sort({ createdAt: -1 });
+    res.json({ success: true, count: items.length, equipment: items });
   } catch (error) {
     res.status(500).json({
       success: false,
@@ -244,6 +261,25 @@ router.get('/stats/categories', async (req, res) => {
       message: 'Server error',
       error: error.message,
     });
+  }
+});
+
+// @route   PUT /api/equipment/:id/featured
+// @desc    Toggle featured status (admin only)
+router.put('/:id/featured', adminAuth, async (req, res) => {
+  try {
+    const { featured } = req.body;
+    const equipment = await Equipment.findByIdAndUpdate(
+      req.params.id,
+      { $set: { isFeatured: !!featured } },
+      { new: true }
+    );
+    if (!equipment) {
+      return res.status(404).json({ success: false, message: 'Equipment not found' });
+    }
+    res.json({ success: true, message: featured ? 'Featured' : 'Unfeatured', equipment });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 });
 

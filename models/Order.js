@@ -101,6 +101,31 @@ const orderSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Chat',
   },
+  // Dispute handling
+  disputeFlag: {
+    type: Boolean,
+    default: false,
+  },
+  disputeStatus: {
+    type: String,
+    enum: ['open', 'resolved'],
+    default: 'open',
+  },
+  disputeReason: {
+    type: String,
+    default: '',
+  },
+  resolution: {
+    type: String,
+    default: '',
+  },
+  resolvedBy: {
+    type: String,
+    default: '',
+  },
+  resolvedAt: {
+    type: Date,
+  },
   // Timestamps
   createdAt: {
     type: Date,

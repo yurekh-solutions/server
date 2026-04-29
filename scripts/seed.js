@@ -48,6 +48,16 @@ const suppliers = [
     phone: '+919876543214',
     userType: 'buyer',
   },
+  // Supplier demo account
+  {
+    email: 'supplier@test.com',
+    password: 'password123',
+    name: 'Demo Supplier',
+    phone: '+919876543215',
+    userType: 'supplier',
+    businessName: 'Demo Supplier Co.',
+    businessDescription: 'Demo AV equipment supplier account',
+  },
 ];
 
 // Equipment data from your existing database

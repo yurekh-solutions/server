@@ -71,24 +71,85 @@ const userSchema = new mongoose.Schema({
     required: function() { return this.userType === 'supplier'; },
   },
   businessDescription: String,
-  gstNumber: String,
-  
-  // Verification & Status
-  isVerified: {
-    type: Boolean,
-    default: false,
+  gstNumber: {
+    type: String,
+    default: '',
   },
+  panNumber: {
+    type: String,
+    default: '',
+  },
+  // Service area for suppliers
+  serviceArea: {
+    city: { type: String, default: '' },
+    state: { type: String, default: '' },
+    pincode: { type: String, default: '' },
+    fullAddress: { type: String, default: '' },
+  },
+  // Bank details for payouts
+  bankDetails: {
+    accountNumber: { type: String, default: '' },
+    ifsc: { type: String, default: '' },
+    bankName: { type: String, default: '' },
+    accountHolderName: { type: String, default: '' },
+  },
+  // KYC Status
+  kycStatus: {
+    type: String,
+    enum: ['pending', 'submitted', 'approved', 'rejected'],
+    default: 'pending',
+  },
+  // Uploaded KYC document (PDF) — admin views this to approve/reject.
+  kycDocument: {
+    url: { type: String, default: '' },
+    publicId: { type: String, default: '' },
+    filename: { type: String, default: '' },
+    mimeType: { type: String, default: '' },
+    size: { type: Number, default: 0 },
+    uploadedAt: Date,
+  },
+  kycSubmittedAt: Date,
+  kycApprovedAt: Date,
+  kycRejectedAt: Date,
+  kycReviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  kycRejectionReason: String,
   // Admin-controlled account state (separate from isVerified which tracks OTP).
   accountStatus: {
     type: String,
-    enum: ['active', 'suspended', 'pending'],
-    default: 'active',
+    enum: ['active', 'suspended', 'pending', 'rejected'],
+    default: function() {
+      return this.userType === 'supplier' ? 'pending' : 'active';
+    },
   },
   verificationOTP: String,
   verificationOTPExpires: Date,
   resetOTP: String,
   resetOTPExpires: Date,
   
+  // Featured / commission
+  isFeatured: {
+    type: Boolean,
+    default: false,
+  },
+  commissionRate: {
+    type: Number,
+    default: 10,
+    min: 0,
+    max: 100,
+  },
+  // Fraud flags
+  isFraudFlagged: {
+    type: Boolean,
+    default: false,
+  },
+  fraudNotes: {
+    type: String,
+    default: '',
+  },
+  fraudFlaggedAt: Date,
+  // Push Notifications
+  fcmToken: String,
+
   // Rating & Stats
   rating: {
     type: Number,
@@ -104,10 +165,6 @@ const userSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
-  
-  // Push Notifications
-  fcmToken: String,
-  
   // Timestamps
   createdAt: {
     type: Date,

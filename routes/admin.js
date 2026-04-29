@@ -609,4 +609,341 @@ router.get('/inquiries', async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// VENDOR MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════
+
+// GET /api/admin/vendors — list all suppliers with KYC status
+router.get('/vendors', async (req, res) => {
+  try {
+    const { page = 1, pageSize = 50, search, kycStatus, accountStatus, featured } = req.query;
+    const filter = { userType: 'supplier' };
+
+    if (kycStatus && kycStatus !== 'all') filter.kycStatus = kycStatus;
+    if (accountStatus && accountStatus !== 'all') filter.accountStatus = accountStatus;
+    if (featured === 'true') filter.isFeatured = true;
+    if (featured === 'false') filter.isFeatured = false;
+
+    let query = User.find(filter);
+
+    if (search) {
+      query = query.or([
+        { name: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { businessName: { $regex: search, $options: 'i' } },
+      ]);
+    }
+
+    const total = await User.countDocuments(filter);
+    const vendors = await query
+      .sort({ createdAt: -1 })
+      .skip((Number(page) - 1) * Number(pageSize))
+      .limit(Number(pageSize))
+      .select('-password');
+
+    const data = vendors.map(v => ({
+      id: v._id,
+      name: v.name,
+      email: v.email,
+      phone: v.phone || '',
+      businessName: v.businessName || '',
+      gstNumber: v.gstNumber || '',
+      panNumber: v.panNumber || '',
+      serviceArea: v.serviceArea || { city: '', state: '', pincode: '', fullAddress: '' },
+      rating: v.rating || 0,
+      isVerified: v.isVerified || false,
+      kycStatus: v.kycStatus || 'pending',
+      accountStatus: v.accountStatus || 'pending',
+      isFeatured: v.isFeatured || false,
+      commissionRate: v.commissionRate || 10,
+      isFraudFlagged: v.isFraudFlagged || false,
+      fraudNotes: v.fraudNotes || '',
+      totalOrders: v.totalOrders || 0,
+      totalEarnings: v.totalEarnings || 0,
+      kycSubmittedAt: v.kycSubmittedAt,
+      kycApprovedAt: v.kycApprovedAt,
+      kycDocument: v.kycDocument || null,
+      createdAt: v.createdAt,
+    }));
+
+    res.json({ vendors: data, total, page: Number(page), pageSize: Number(pageSize) });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// GET /api/admin/vendors/:id — single vendor detail
+router.get('/vendors/:id', async (req, res) => {
+  try {
+    const vendor = await User.findOne({ _id: req.params.id, userType: 'supplier' }).select('-password');
+    if (!vendor) return res.status(404).json({ message: 'Vendor not found' });
+
+    const equipmentCount = await Equipment.countDocuments({ supplierId: vendor._id });
+    const activeOrders = await Order.countDocuments({ supplierId: vendor._id, status: { $in: ['confirmed', 'in_progress'] } });
+
+    res.json({
+      id: vendor._id,
+      name: vendor.name,
+      email: vendor.email,
+      phone: vendor.phone || '',
+      businessName: vendor.businessName || '',
+      businessDescription: vendor.businessDescription || '',
+      gstNumber: vendor.gstNumber || '',
+      panNumber: vendor.panNumber || '',
+      serviceArea: vendor.serviceArea || { city: '', state: '', pincode: '', fullAddress: '' },
+      bankDetails: vendor.bankDetails || { accountNumber: '', ifsc: '', bankName: '', accountHolderName: '' },
+      rating: vendor.rating || 0,
+      isVerified: vendor.isVerified || false,
+      kycStatus: vendor.kycStatus || 'pending',
+      kycSubmittedAt: vendor.kycSubmittedAt,
+      kycApprovedAt: vendor.kycApprovedAt,
+      kycRejectedAt: vendor.kycRejectedAt,
+      kycRejectionReason: vendor.kycRejectionReason || '',
+      accountStatus: vendor.accountStatus || 'pending',
+      isFeatured: vendor.isFeatured || false,
+      commissionRate: vendor.commissionRate || 10,
+      isFraudFlagged: vendor.isFraudFlagged || false,
+      fraudNotes: vendor.fraudNotes || '',
+      fraudFlaggedAt: vendor.fraudFlaggedAt,
+      totalOrders: vendor.totalOrders || 0,
+      totalEarnings: vendor.totalEarnings || 0,
+      kycDocument: vendor.kycDocument || null,
+      equipmentCount,
+      activeOrders,
+      createdAt: vendor.createdAt,
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// PUT /api/admin/vendors/:id/approve
+router.put('/vendors/:id/approve', async (req, res) => {
+  try {
+    const vendor = await User.findOneAndUpdate(
+      { _id: req.params.id, userType: 'supplier' },
+      {
+        $set: {
+          accountStatus: 'active',
+          kycStatus: 'approved',
+          kycApprovedAt: new Date(),
+          isVerified: true,
+        },
+      },
+      { new: true }
+    ).select('-password');
+    if (!vendor) return res.status(404).json({ message: 'Vendor not found' });
+    res.json({ success: true, message: 'Vendor approved', vendor });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// PUT /api/admin/vendors/:id/reject
+router.put('/vendors/:id/reject', async (req, res) => {
+  try {
+    const { reason } = req.body;
+    const vendor = await User.findOneAndUpdate(
+      { _id: req.params.id, userType: 'supplier' },
+      {
+        $set: {
+          accountStatus: 'rejected',
+          kycStatus: 'rejected',
+          kycRejectedAt: new Date(),
+          kycRejectionReason: reason || 'No reason provided',
+        },
+      },
+      { new: true }
+    ).select('-password');
+    if (!vendor) return res.status(404).json({ message: 'Vendor not found' });
+    res.json({ success: true, message: 'Vendor rejected', vendor });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// PUT /api/admin/vendors/:id/suspend
+router.put('/vendors/:id/suspend', async (req, res) => {
+  try {
+    const vendor = await User.findOneAndUpdate(
+      { _id: req.params.id, userType: 'supplier' },
+      { $set: { accountStatus: 'suspended' } },
+      { new: true }
+    ).select('-password');
+    if (!vendor) return res.status(404).json({ message: 'Vendor not found' });
+    res.json({ success: true, message: 'Vendor suspended', vendor });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// PUT /api/admin/vendors/:id/reactivate
+router.put('/vendors/:id/reactivate', async (req, res) => {
+  try {
+    const vendor = await User.findOneAndUpdate(
+      { _id: req.params.id, userType: 'supplier' },
+      { $set: { accountStatus: 'active' } },
+      { new: true }
+    ).select('-password');
+    if (!vendor) return res.status(404).json({ message: 'Vendor not found' });
+    res.json({ success: true, message: 'Vendor reactivated', vendor });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// PUT /api/admin/vendors/:id/commission
+router.put('/vendors/:id/commission', async (req, res) => {
+  try {
+    const { rate } = req.body;
+    if (rate === undefined || rate < 0 || rate > 100) {
+      return res.status(400).json({ message: 'Commission rate must be between 0 and 100' });
+    }
+    const vendor = await User.findOneAndUpdate(
+      { _id: req.params.id, userType: 'supplier' },
+      { $set: { commissionRate: Number(rate) } },
+      { new: true }
+    ).select('-password');
+    if (!vendor) return res.status(404).json({ message: 'Vendor not found' });
+    res.json({ success: true, message: 'Commission updated', vendor });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// PUT /api/admin/vendors/:id/featured
+router.put('/vendors/:id/featured', async (req, res) => {
+  try {
+    const { featured } = req.body;
+    const vendor = await User.findOneAndUpdate(
+      { _id: req.params.id, userType: 'supplier' },
+      { $set: { isFeatured: !!featured } },
+      { new: true }
+    ).select('-password');
+    if (!vendor) return res.status(404).json({ message: 'Vendor not found' });
+    res.json({ success: true, message: featured ? 'Vendor featured' : 'Vendor unfeatured', vendor });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// PUT /api/admin/vendors/:id/fraud-flag
+router.put('/vendors/:id/fraud-flag', async (req, res) => {
+  try {
+    const { notes } = req.body;
+    const vendor = await User.findOneAndUpdate(
+      { _id: req.params.id, userType: 'supplier' },
+      {
+        $set: {
+          isFraudFlagged: true,
+          fraudNotes: notes || '',
+          fraudFlaggedAt: new Date(),
+        },
+      },
+      { new: true }
+    ).select('-password');
+    if (!vendor) return res.status(404).json({ message: 'Vendor not found' });
+    res.json({ success: true, message: 'Vendor flagged', vendor });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// PUT /api/admin/vendors/:id/fraud-unflag
+router.put('/vendors/:id/fraud-unflag', async (req, res) => {
+  try {
+    const vendor = await User.findOneAndUpdate(
+      { _id: req.params.id, userType: 'supplier' },
+      {
+        $set: {
+          isFraudFlagged: false,
+          fraudNotes: '',
+          fraudFlaggedAt: null,
+        },
+      },
+      { new: true }
+    ).select('-password');
+    if (!vendor) return res.status(404).json({ message: 'Vendor not found' });
+    res.json({ success: true, message: 'Vendor unflagged', vendor });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DISPUTE MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════
+
+// GET /api/admin/disputes — list orders with disputes
+router.get('/disputes', async (req, res) => {
+  try {
+    const { page = 1, pageSize = 50, status } = req.query;
+    const filter = {
+      $or: [
+        { disputeFlag: true },
+        { disputeStatus: { $in: ['open', 'resolved'] } },
+      ],
+    };
+    if (status && status !== 'all') filter.disputeStatus = status;
+
+    const total = await Order.countDocuments(filter);
+    const orders = await Order.find(filter)
+      .populate('buyerId', 'name email phone')
+      .populate('supplierId', 'name email phone businessName')
+      .populate('equipmentId', 'name images basePrice')
+      .sort({ updatedAt: -1 })
+      .skip((Number(page) - 1) * Number(pageSize))
+      .limit(Number(pageSize));
+
+    const data = orders.map(o => ({
+      id: o._id,
+      orderId: o._id.toString().slice(-8).toUpperCase(),
+      buyer: o.buyerId ? { id: o.buyerId._id, name: o.buyerId.name, email: o.buyerId.email, phone: o.buyerId.phone } : null,
+      supplier: o.supplierId ? { id: o.supplierId._id, name: o.supplierId.name, email: o.supplierId.email, phone: o.supplierId.phone, businessName: o.supplierId.businessName } : null,
+      equipment: o.equipmentId ? { id: o.equipmentId._id, name: o.equipmentId.name, image: o.equipmentId.images?.[0] || '' } : null,
+      totalAmount: o.totalAmount || 0,
+      disputeFlag: o.disputeFlag || false,
+      disputeStatus: o.disputeStatus || 'open',
+      disputeReason: o.disputeReason || '',
+      resolution: o.resolution || '',
+      createdAt: o.createdAt,
+      updatedAt: o.updatedAt,
+    }));
+
+    res.json({ disputes: data, total, page: Number(page), pageSize: Number(pageSize) });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// PUT /api/admin/disputes/:id — resolve a dispute
+router.put('/disputes/:id', async (req, res) => {
+  try {
+    const { action, resolution } = req.body;
+    const validActions = ['refund', 'no_refund', 'partial_refund', 'dismiss'];
+    if (!validActions.includes(action)) {
+      return res.status(400).json({ message: 'Invalid action. Must be one of: ' + validActions.join(', ') });
+    }
+
+    const order = await Order.findByIdAndUpdate(
+      req.params.id,
+      {
+        $set: {
+          disputeStatus: 'resolved',
+          disputeFlag: false,
+          resolution: resolution || action,
+          resolvedBy: 'admin',
+          resolvedAt: new Date(),
+        },
+      },
+      { new: true }
+    );
+    if (!order) return res.status(404).json({ message: 'Order not found' });
+
+    res.json({ success: true, message: `Dispute resolved with action: ${action}`, order });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
 module.exports = router;
