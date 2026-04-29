@@ -619,7 +619,14 @@ router.get('/vendors', async (req, res) => {
     const { page = 1, pageSize = 50, search, kycStatus, accountStatus, featured } = req.query;
     const filter = { userType: 'supplier' };
 
-    if (kycStatus && kycStatus !== 'all') filter.kycStatus = kycStatus;
+    if (kycStatus && kycStatus !== 'all') {
+      const statuses = String(kycStatus).split(',').map((s) => s.trim()).filter(Boolean);
+      if (statuses.length === 1) {
+        filter.kycStatus = statuses[0];
+      } else if (statuses.length > 1) {
+        filter.kycStatus = { $in: statuses };
+      }
+    }
     if (accountStatus && accountStatus !== 'all') filter.accountStatus = accountStatus;
     if (featured === 'true') filter.isFeatured = true;
     if (featured === 'false') filter.isFeatured = false;
@@ -665,6 +672,8 @@ router.get('/vendors', async (req, res) => {
       totalEarnings: v.totalEarnings || 0,
       kycSubmittedAt: v.kycSubmittedAt,
       kycApprovedAt: v.kycApprovedAt,
+      kycRejectedAt: v.kycRejectedAt,
+      kycRejectionReason: v.kycRejectionReason || '',
       kycDocument: v.kycDocument || null,
       kycDocuments: v.kycDocuments || null,
       createdAt: v.createdAt,

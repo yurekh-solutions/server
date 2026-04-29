@@ -235,9 +235,8 @@ router.post('/kyc-document', protect, uploadKyc.single('document'), async (req, 
 
 // @route   POST /api/auth/kyc-documents
 // @desc    Upload multi-slot KYC documents (PAN/Aadhaar/BankProof/GST)
-//          along with business description, products offered, years in
-//          business. Admin reviews each document separately before
-//          approving the vendor account.
+//          along with business metadata (description, products, years).
+//          Admin reviews each document before approving the vendor.
 const kycDocsFields = uploadKyc.fields([
   { name: 'pan', maxCount: 1 },
   { name: 'aadhaar', maxCount: 1 },
@@ -253,6 +252,8 @@ router.post('/kyc-documents', protect, kycDocsFields, async (req, res) => {
     }
 
     const files = req.files || {};
+
+    // Helper: build doc object from uploaded file
     const buildDoc = (file) => {
       if (!file) return null;
       return {
@@ -265,6 +266,7 @@ router.post('/kyc-documents', protect, kycDocsFields, async (req, res) => {
       };
     };
 
+    // Merge new uploads with existing docs (don't overwrite if not re-uploaded)
     const existing = await User.findById(user.id).select('kycDocuments');
     const current = (existing && existing.kycDocuments) || {};
     const kycDocuments = {
@@ -274,7 +276,7 @@ router.post('/kyc-documents', protect, kycDocsFields, async (req, res) => {
       gst: buildDoc(files.gst && files.gst[0]) || current.gst || undefined,
     };
 
-    // Required: PAN + BankProof (aadhaar optional, gst recommended).
+    // Required: PAN + BankProof
     if (!kycDocuments.pan || !kycDocuments.pan.url) {
       return res.status(400).json({ success: false, message: 'PAN Card is required.' });
     }
@@ -282,7 +284,7 @@ router.post('/kyc-documents', protect, kycDocsFields, async (req, res) => {
       return res.status(400).json({ success: false, message: 'Bank Proof is required.' });
     }
 
-    // Parse business detail fields from multipart body.
+    // Parse business metadata from request body
     const {
       businessName,
       businessDescription,
@@ -292,25 +294,25 @@ router.post('/kyc-documents', protect, kycDocsFields, async (req, res) => {
       panNumber,
     } = req.body || {};
 
+    // Parse productsOffered: array, JSON string, or comma-separated string
     let productsList = [];
-    if (Array.isArray(productsOffered)) productsList = productsOffered;
-    else if (typeof productsOffered === 'string' && productsOffered.length) {
+    if (Array.isArray(productsOffered)) {
+      productsList = productsOffered;
+    } else if (typeof productsOffered === 'string' && productsOffered.length) {
       try {
         const parsed = JSON.parse(productsOffered);
-        productsList = Array.isArray(parsed)
-          ? parsed
-          : productsOffered.split(',').map((s) => s.trim()).filter(Boolean);
+        productsList = Array.isArray(parsed) ? parsed : productsOffered.split(',').map((s) => s.trim()).filter(Boolean);
       } catch {
         productsList = productsOffered.split(',').map((s) => s.trim()).filter(Boolean);
       }
     }
 
+    // Build updates object
     const updates = {
       kycDocuments,
       kycStatus: 'submitted',
       kycSubmittedAt: new Date(),
-      // Mirror the primary document (PAN) into legacy kycDocument for old admin views.
-      kycDocument: kycDocuments.pan,
+      kycDocument: kycDocuments.pan, // Mirror PAN to legacy single-file slot
     };
     if (businessName !== undefined) updates.businessName = businessName;
     if (businessDescription !== undefined) updates.businessDescription = businessDescription;
@@ -435,6 +437,8 @@ router.get('/me', protect, async (req, res) => {
         isVerified: user.isVerified,
         businessName: user.businessName,
         businessDescription: user.businessDescription,
+        productsOffered: user.productsOffered,
+        yearsInBusiness: user.yearsInBusiness,
         gstNumber: user.gstNumber,
         panNumber: user.panNumber,
         serviceArea: user.serviceArea,
@@ -549,26 +553,7 @@ router.post('/verify-otp', async (req, res) => {
   }
 });
 
-// @route   GET /api/auth/me
-// @desc    Get current logged in user
-router.get('/me', protect, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id);
-    
-    res.json({
-      success: true,
-      user,
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Server error',
-      error: error.message,
-    });
-  }
-});
-
-// @route   PUT /api/auth/update-profile  (and /api/auth/profile)
+// @route   PUT /api/auth/profile
 // @desc    Update user profile
 const updateProfileHandler = async (req, res) => {
   try {
