@@ -2,11 +2,22 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const { OAuth2Client } = require('google-auth-library');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
 const { protect } = require('../middleware/auth');
 const { uploadKyc, resolveKycUrl } = require('../middleware/upload');
 const { sendKycSubmissionNotification } = require('../services/emailService');
+
+// Google OAuth client IDs — accept tokens from any of our registered client IDs
+// (Web + Android + iOS) because Expo Auth Session issues the idToken with one of them.
+const GOOGLE_CLIENT_IDS = [
+  process.env.GOOGLE_CLIENT_ID_WEB,
+  process.env.GOOGLE_CLIENT_ID_ANDROID,
+  process.env.GOOGLE_CLIENT_ID_IOS,
+  process.env.GOOGLE_CLIENT_ID_EXPO, // Expo proxy client
+].filter(Boolean);
+const googleOAuthClient = new OAuth2Client();
 
 // Generate JWT Token
 const generateToken = (id) => {
@@ -24,7 +35,21 @@ const generateOTP = () => {
 // @desc    Register a new user (buyer or supplier)
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, phone, name, userType, businessName } = req.body;
+    const {
+      email,
+      password,
+      phone,
+      name,
+      userType,
+      businessName,
+      // Buyer address fields (accepted flat from client)
+      address,
+      street,
+      city,
+      state,
+      pincode,
+      avatar,
+    } = req.body;
 
     // Check if user already exists
     const userExists = await User.findOne({ email });
@@ -35,14 +60,40 @@ router.post('/register', async (req, res) => {
       });
     }
 
-    // Create user
+    // Build address subdoc. Accept either a nested `address` object or flat fields.
+    const addrSource = (address && typeof address === 'object') ? address : {};
+    const fullStreet = addrSource.street ?? street ?? (typeof address === 'string' ? address : '');
+    const hasAnyAddr = Boolean(
+      fullStreet || addrSource.city || city || addrSource.state || state || addrSource.pincode || pincode
+    );
+    const addressDoc = hasAnyAddr
+      ? {
+          street: fullStreet || '',
+          city: addrSource.city || city || '',
+          state: addrSource.state || state || '',
+          pincode: addrSource.pincode || pincode || '',
+          country: addrSource.country || 'India',
+        }
+      : undefined;
+
+    // Validate pincode for buyers (required, 6-digit Indian format)
     const isSupplier = userType === 'supplier';
+    if (!isSupplier && addressDoc && addressDoc.pincode && !/^[0-9]{6}$/.test(addressDoc.pincode)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Pincode must be a valid 6-digit number.',
+      });
+    }
+
+    // Create user
     const user = await User.create({
       email,
       password,
       phone,
       name,
       userType,
+      avatar: avatar || '',
+      address: addressDoc,
       businessName: isSupplier ? businessName : undefined,
       isVerified: false,
       accountStatus: isSupplier ? 'pending' : 'active',
@@ -63,7 +114,10 @@ router.post('/register', async (req, res) => {
         id: user._id,
         email: user.email,
         name: user.name,
+        phone: user.phone,
         userType: user.userType,
+        avatar: user.avatar,
+        address: user.address,
         accountStatus: user.accountStatus,
         kycStatus: user.kycStatus,
         isVerified: user.isVerified,
@@ -74,6 +128,125 @@ router.post('/register', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Server error during registration',
+      error: error.message,
+    });
+  }
+});
+
+// @route   POST /api/auth/google
+// @desc    Sign in / sign up a buyer with a Google ID token (from Expo Auth Session
+//          or any Google OAuth 2.0 flow). Verifies the token against Google's
+//          public keys, then upserts a buyer user and returns our JWT.
+router.post('/google', async (req, res) => {
+  try {
+    const { idToken, userType } = req.body || {};
+    if (!idToken) {
+      return res.status(400).json({ success: false, message: 'Missing Google ID token' });
+    }
+    if (GOOGLE_CLIENT_IDS.length === 0) {
+      return res.status(500).json({
+        success: false,
+        message: 'Google OAuth is not configured on the server. Contact support.',
+      });
+    }
+
+    // Verify the idToken cryptographically against Google's published keys.
+    let payload;
+    try {
+      const ticket = await googleOAuthClient.verifyIdToken({
+        idToken,
+        audience: GOOGLE_CLIENT_IDS,
+      });
+      payload = ticket.getPayload();
+    } catch (verifyErr) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid Google token',
+        error: verifyErr.message,
+      });
+    }
+
+    if (!payload || !payload.email) {
+      return res.status(401).json({ success: false, message: 'Google token missing email' });
+    }
+    if (payload.email_verified === false) {
+      return res.status(403).json({ success: false, message: 'Google email is not verified' });
+    }
+
+    const email = payload.email.toLowerCase().trim();
+    const name = payload.name || payload.given_name || email.split('@')[0];
+    const picture = payload.picture || '';
+    const role = userType === 'supplier' ? 'supplier' : 'buyer';
+
+    // Upsert user. If email already exists we log them in; otherwise create a
+    // new account with a random password (user can reset later if they want
+    // to add an email+password option).
+    let user = await User.findOne({ email });
+    if (!user) {
+      const randomPassword = crypto.randomBytes(24).toString('hex');
+      user = await User.create({
+        email,
+        name,
+        phone: '', // Google doesn't return phone — user fills later.
+        password: randomPassword,
+        userType: role,
+        avatar: picture,
+        isVerified: true, // email already verified by Google
+        accountStatus: role === 'supplier' ? 'pending' : 'active',
+        kycStatus: role === 'supplier' ? 'pending' : undefined,
+      });
+    } else if (!user.avatar && picture) {
+      user.avatar = picture;
+      await user.save();
+    }
+
+    // Block unapproved suppliers from signing in (same rules as /login)
+    if (user.userType === 'supplier') {
+      if (user.accountStatus === 'pending') {
+        return res.status(403).json({
+          success: false,
+          message: 'Your supplier account is pending admin approval.',
+          code: 'ACCOUNT_PENDING',
+        });
+      }
+      if (user.accountStatus === 'rejected') {
+        return res.status(403).json({
+          success: false,
+          message: 'Your account has been rejected.',
+          code: 'ACCOUNT_REJECTED',
+        });
+      }
+      if (user.accountStatus === 'suspended') {
+        return res.status(403).json({
+          success: false,
+          message: 'Your account has been suspended.',
+          code: 'ACCOUNT_SUSPENDED',
+        });
+      }
+    }
+
+    const token = generateToken(user._id);
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user._id,
+        email: user.email,
+        name: user.name,
+        phone: user.phone,
+        userType: user.userType,
+        avatar: user.avatar,
+        address: user.address,
+        accountStatus: user.accountStatus,
+        kycStatus: user.kycStatus,
+        isVerified: user.isVerified,
+        businessName: user.businessName,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Server error during Google sign-in',
       error: error.message,
     });
   }
