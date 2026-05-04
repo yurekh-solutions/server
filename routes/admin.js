@@ -17,6 +17,7 @@ const Equipment = require('../models/Equipment');
 const Order = require('../models/Order');
 const Inquiry = require('../models/Inquiry');
 const Notification = require('../models/Notification');
+const Requirement = require('../models/Requirement');
 const {
   sendKycApprovalEmail,
   sendKycRejectionEmail,
@@ -606,6 +607,84 @@ router.get('/inquiries', async (req, res) => {
       status: i.status === 'pending' ? 'open' : i.status,
       messageCount: (i.counterHistory || []).length,
       createdAt: i.createdAt,
+    }));
+
+    res.json({ data, total, page, pageSize });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// REQUIREMENTS (buyer posts)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// GET /api/admin/requirements → RequirementListResponse
+router.get('/requirements', async (req, res) => {
+  try {
+    const { status, search, eventType } = req.query;
+    const { page, pageSize, skip } = pageParams(req);
+
+    const query = {};
+    if (status && status !== 'all' &&
+        ['open', 'matched', 'booked', 'cancelled'].includes(String(status))) {
+      query.status = status;
+    }
+    if (eventType && eventType !== 'all') {
+      query.eventType = eventType;
+    }
+
+    const [rows, total] = await Promise.all([
+      Requirement.find(query)
+        .populate('buyerId', 'name email phone')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(pageSize)
+        .lean(),
+      Requirement.countDocuments(query),
+    ]);
+
+    let filtered = rows;
+    if (search) {
+      const s = String(search).toLowerCase();
+      filtered = rows.filter((r) => {
+        const hay = [
+          r.buyerId?.name,
+          r.buyerId?.email,
+          r.eventType,
+          r.location?.city,
+          r.location?.address,
+          (r.items || []).join(' '),
+        ].filter(Boolean).join(' ').toLowerCase();
+        return hay.includes(s);
+      });
+    }
+
+    // Attach inquiry count for each requirement (light-weight batched aggregation)
+    const ids = filtered.map((r) => r._id);
+    const counts = await Inquiry.aggregate([
+      { $match: { requirementId: { $in: ids } } },
+      { $group: { _id: '$requirementId', c: { $sum: 1 } } },
+    ]);
+    const countMap = new Map(counts.map((x) => [String(x._id), x.c]));
+
+    const data = filtered.map((r) => ({
+      _id: r._id,
+      buyer: r.buyerId
+        ? { _id: r.buyerId._id, name: r.buyerId.name || 'Unknown', email: r.buyerId.email || '' }
+        : null,
+      eventType: r.eventType,
+      city: r.location?.city || '',
+      address: r.location?.address || '',
+      date: r.date || '',
+      startTime: r.startTime || '',
+      endTime: r.endTime || '',
+      items: r.items || [],
+      budget: r.budget || '',
+      notes: r.notes || '',
+      status: r.status,
+      inquiryCount: countMap.get(String(r._id)) || 0,
+      createdAt: r.createdAt,
     }));
 
     res.json({ data, total, page, pageSize });

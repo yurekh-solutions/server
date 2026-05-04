@@ -146,6 +146,20 @@ router.get('/', protect, async (req, res) => {
   }
 });
 
+// @route   GET /api/orders/my-orders
+// @desc    Alias for GET /api/orders (buyer's orders) — kept for mobile client compatibility.
+router.get('/my-orders', protect, async (req, res) => {
+  try {
+    const orders = await Order.find({ buyerId: req.user.id })
+      .populate('supplierId', 'name businessName phone rating')
+      .populate('items.equipmentId')
+      .sort({ createdAt: -1 });
+    res.json({ success: true, count: orders.length, orders });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+});
+
 // @route   GET /api/orders/supplier
 // @desc    Get supplier's orders
 router.get('/supplier', protect, async (req, res) => {
@@ -173,6 +187,10 @@ router.get('/supplier', protect, async (req, res) => {
 // @desc    Get single order
 router.get('/:id', protect, async (req, res) => {
   try {
+    const mongoose = require('mongoose');
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ success: false, message: 'Invalid order id' });
+    }
     const order = await Order.findById(req.params.id)
       .populate('buyerId', 'name phone email')
       .populate('supplierId', 'name businessName phone rating avatar')

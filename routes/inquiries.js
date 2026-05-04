@@ -4,19 +4,46 @@ const Inquiry = require('../models/Inquiry');
 const { protect, authorize } = require('../middleware/auth');
 
 // @route   POST /api/inquiries
-// @desc    Buyer sends an inquiry to a vendor
-router.post('/', protect, authorize('buyer'), async (req, res) => {
+// @desc    Create an inquiry. Buyers target a specific vendor; suppliers quote
+//          on a buyer's posted requirement (the supplier becomes the vendor).
+router.post('/', protect, async (req, res) => {
   try {
-    const { vendorId, requirementId, initialPrice } = req.body;
-    if (!vendorId || !requirementId) {
-      return res.status(400).json({ success: false, message: 'vendorId and requirementId are required' });
+    const { vendorId: vendorIdBody, requirementId, initialPrice, message } = req.body;
+    if (!requirementId) {
+      return res.status(400).json({ success: false, message: 'requirementId is required' });
+    }
+
+    let buyerId, vendorId;
+    const Requirement = require('../models/Requirement');
+
+    if (req.user.userType === 'buyer') {
+      if (!vendorIdBody) {
+        return res.status(400).json({ success: false, message: 'vendorId is required' });
+      }
+      buyerId = req.user.id;
+      vendorId = vendorIdBody;
+    } else if (req.user.userType === 'supplier') {
+      // Supplier quoting on a buyer's requirement
+      const requirement = await Requirement.findById(requirementId).select('buyerId');
+      if (!requirement) {
+        return res.status(404).json({ success: false, message: 'Requirement not found' });
+      }
+      buyerId = requirement.buyerId;
+      vendorId = req.user.id;
+    } else {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
     }
 
     const inquiry = await Inquiry.create({
       requirementId,
-      buyerId: req.user.id,
+      buyerId,
       vendorId,
       quotedPrice: initialPrice,
+      counterHistory:
+        req.user.userType === 'supplier' && (initialPrice || message)
+          ? [{ from: 'vendor', kind: 'quote', price: initialPrice, text: message }]
+          : [],
+      status: req.user.userType === 'supplier' ? 'responded' : 'pending',
     });
 
     res.status(201).json({ success: true, inquiry });

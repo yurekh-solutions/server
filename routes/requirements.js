@@ -42,6 +42,29 @@ router.get('/me', protect, authorize('buyer'), async (req, res) => {
   }
 });
 
+// @route   GET /api/requirements
+// @desc    Suppliers browse open buyer requirements (marketplace feed).
+//          Supports optional filters: city, eventType, item, status.
+router.get('/', protect, authorize('supplier'), async (req, res) => {
+  try {
+    const { city, eventType, item, status = 'open', limit = 50 } = req.query;
+    const query = {};
+    if (status && status !== 'all') query.status = status;
+    if (city) query['location.city'] = new RegExp(`^${city}$`, 'i');
+    if (eventType) query.eventType = eventType;
+    if (item) query.items = item;
+
+    const requirements = await Requirement.find(query)
+      .populate('buyerId', 'name')
+      .sort({ createdAt: -1 })
+      .limit(Math.min(200, Number(limit) || 50));
+
+    res.json({ success: true, count: requirements.length, requirements });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error', error: err.message });
+  }
+});
+
 // @route   GET /api/requirements/:id
 // @desc    Get a single requirement
 router.get('/:id', protect, async (req, res) => {
