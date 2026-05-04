@@ -51,6 +51,15 @@ router.post('/register', async (req, res) => {
       avatar,
     } = req.body;
 
+    // Phone is optional at schema level (so OAuth sign-ins can create users),
+    // but email/password register MUST provide it.
+    if (!email || !password || !name || !phone) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide email, password, name, and phone.',
+      });
+    }
+
     // Check if user already exists
     const userExists = await User.findOne({ email });
     if (userExists) {
@@ -144,6 +153,7 @@ router.post('/google', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Missing Google ID token' });
     }
     if (GOOGLE_CLIENT_IDS.length === 0) {
+      console.error('[GoogleAuth] No GOOGLE_CLIENT_ID_* env vars configured on server!');
       return res.status(500).json({
         success: false,
         message: 'Google OAuth is not configured on the server. Contact support.',
@@ -158,7 +168,9 @@ router.post('/google', async (req, res) => {
         audience: GOOGLE_CLIENT_IDS,
       });
       payload = ticket.getPayload();
+      console.log('[GoogleAuth] Token verified for:', payload?.email);
     } catch (verifyErr) {
+      console.error('[GoogleAuth] Token verification failed:', verifyErr.message);
       return res.status(401).json({
         success: false,
         message: 'Invalid Google token',
@@ -183,18 +195,31 @@ router.post('/google', async (req, res) => {
     // to add an email+password option).
     let user = await User.findOne({ email });
     if (!user) {
+      console.log('[GoogleAuth] Creating new user for:', email);
       const randomPassword = crypto.randomBytes(24).toString('hex');
-      user = await User.create({
-        email,
-        name,
-        phone: '', // Google doesn't return phone — user fills later.
-        password: randomPassword,
-        userType: role,
-        avatar: picture,
-        isVerified: true, // email already verified by Google
-        accountStatus: role === 'supplier' ? 'pending' : 'active',
-        kycStatus: role === 'supplier' ? 'pending' : undefined,
-      });
+      try {
+        user = await User.create({
+          email,
+          name,
+          phone: '', // Google doesn't return phone — user fills later via profile.
+          password: randomPassword,
+          userType: role,
+          avatar: picture,
+          isVerified: true, // email already verified by Google
+          accountStatus: role === 'supplier' ? 'pending' : 'active',
+          kycStatus: role === 'supplier' ? 'pending' : undefined,
+        });
+        console.log('[GoogleAuth] New user created:', String(user._id));
+      } catch (createErr) {
+        console.error('[GoogleAuth] User creation failed:', createErr.message);
+        console.error('[GoogleAuth] Validation errors:', JSON.stringify(createErr.errors || {}, null, 2));
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to create user account',
+          error: createErr.message,
+          details: createErr.errors,
+        });
+      }
     } else if (!user.avatar && picture) {
       user.avatar = picture;
       await user.save();
@@ -226,6 +251,7 @@ router.post('/google', async (req, res) => {
     }
 
     const token = generateToken(user._id);
+    console.log('[GoogleAuth] Login successful for:', email);
     res.json({
       success: true,
       token,
@@ -244,6 +270,8 @@ router.post('/google', async (req, res) => {
       },
     });
   } catch (error) {
+    console.error('[GoogleAuth] Unexpected server error:', error.message);
+    console.error('[GoogleAuth] Stack:', error.stack);
     res.status(500).json({
       success: false,
       message: 'Server error during Google sign-in',

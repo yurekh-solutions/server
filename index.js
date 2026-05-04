@@ -75,6 +75,51 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'UrbanAV API is running' });
 });
 
+// Cloudinary configuration health check (safe — does not expose secrets).
+// Use this to verify that CLOUDINARY_* env vars are present on the deployed
+// server (e.g. Render). Returns booleans and the public cloud name only.
+app.get('/api/health/cloudinary', (req, res) => {
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME || '';
+  const apiKey = process.env.CLOUDINARY_API_KEY || '';
+  const apiSecret = process.env.CLOUDINARY_API_SECRET || '';
+  const cloudinaryUrl = process.env.CLOUDINARY_URL || '';
+  const allSet = !!cloudName && !!apiKey && !!apiSecret;
+  res.json({
+    cloudinaryEnabled: allSet || !!cloudinaryUrl,
+    env: {
+      CLOUDINARY_CLOUD_NAME: cloudName ? `set (${cloudName})` : 'MISSING',
+      CLOUDINARY_API_KEY: apiKey ? `set (len=${apiKey.length})` : 'MISSING',
+      CLOUDINARY_API_SECRET: apiSecret ? `set (len=${apiSecret.length})` : 'MISSING',
+      CLOUDINARY_URL: cloudinaryUrl ? 'set (alternative config)' : 'not set',
+    },
+    storageMode: (allSet || !!cloudinaryUrl) ? 'cloudinary' : 'local-disk-fallback',
+    nodeEnv: process.env.NODE_ENV || 'development',
+  });
+});
+
+// Auth configuration health check (safe — does not expose secrets).
+// Verifies JWT_SECRET, MONGODB_URI, and Google OAuth client IDs are present.
+app.get('/api/health/auth', (req, res) => {
+  const googleIds = [
+    process.env.GOOGLE_CLIENT_ID_WEB,
+    process.env.GOOGLE_CLIENT_ID_ANDROID,
+    process.env.GOOGLE_CLIENT_ID_IOS,
+    process.env.GOOGLE_CLIENT_ID_EXPO,
+  ].filter(Boolean);
+  res.json({
+    env: {
+      JWT_SECRET: process.env.JWT_SECRET ? 'set' : 'MISSING',
+      MONGODB_URI: process.env.MONGODB_URI ? 'set' : 'MISSING',
+      GOOGLE_CLIENT_ID_WEB: process.env.GOOGLE_CLIENT_ID_WEB ? 'set' : 'MISSING',
+      GOOGLE_CLIENT_ID_ANDROID: process.env.GOOGLE_CLIENT_ID_ANDROID ? 'set' : 'MISSING',
+      GOOGLE_CLIENT_ID_IOS: process.env.GOOGLE_CLIENT_ID_IOS ? 'set' : 'MISSING',
+      GOOGLE_CLIENT_ID_EXPO: process.env.GOOGLE_CLIENT_ID_EXPO ? 'set' : 'MISSING',
+    },
+    googleClientIdsConfigured: googleIds.length,
+    mongooseConnected: require('mongoose').connection.readyState === 1,
+  });
+});
+
 // WebSocket - Real-time Chat
 const activeUsers = new Map(); // userId -> socketId
 
