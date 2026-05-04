@@ -29,18 +29,27 @@ router.post(
           .json({ success: false, message: 'No file uploaded' });
       }
 
+      console.log('📤 Upload received:', {
+        filename: req.file.originalname,
+        size: req.file.size,
+        mimetype: req.file.mimetype,
+        hasCloudinary: !!req.file.path || !!req.file.secure_url,
+      });
+
       const url = resolveUploadUrl(req, req.file);
       if (!url) {
         return res
           .status(500)
-          .json({ success: false, message: 'Upload failed' });
+          .json({ success: false, message: 'Upload failed - no URL generated' });
       }
+
+      console.log('✅ Upload URL generated:', url);
 
       // Best-effort delete of previous Cloudinary avatar to save storage.
       if (hasCloudinary && cloudinary && req.user?.avatarPublicId) {
         cloudinary.uploader
           .destroy(req.user.avatarPublicId)
-          .catch(() => {});
+          .catch((err) => console.log('⚠️ Failed to delete old avatar:', err.message));
       }
 
       const publicId = req.file.filename || req.file.public_id || null;
@@ -49,8 +58,11 @@ router.post(
         avatarPublicId: publicId,
       });
 
+      console.log('✅ Avatar updated in database');
       res.json({ success: true, url, publicId });
     } catch (err) {
+      console.error('❌ Upload error:', err);
+      console.error('   Stack:', err.stack);
       res
         .status(500)
         .json({ success: false, message: err.message || 'Upload error' });

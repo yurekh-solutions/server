@@ -143,12 +143,46 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`\n🚀 UrbanAV Server Running`);
-  console.log(`📡 Port: ${PORT}`);
-  console.log(`🌐 Environment: ${NODE_ENV}`);
-  console.log(`🔗 API URL: http://localhost:${PORT}`);
-  console.log(`📱 Client URL: ${process.env.CLIENT_URL || 'http://localhost:8081'}`);
-  console.log(`🔌 WebSocket: http://localhost:${PORT}`);
-  console.log('\n' + '='.repeat(50));
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('❌ Error:', err.message || err);
+  console.error('   Stack:', err.stack);
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || 'Internal server error',
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
+  });
 });
+
+// Attempt to listen on PORT with automatic fallback if the port is blocked
+// (common on Windows when Hyper-V/WinNAT dynamic exclusions or another
+// process claims the port). Tries PORT, PORT+1, ... up to PORT+20.
+function startListening(startPort, attempts = 0) {
+  const maxAttempts = 20;
+  const port = Number(startPort) + attempts;
+
+  const onError = (err) => {
+    if (err && err.code === 'EADDRINUSE' && attempts < maxAttempts) {
+      console.warn(`⚠️  Port ${port} in use or blocked, trying ${port + 1}...`);
+      server.removeListener('error', onError);
+      setImmediate(() => startListening(startPort, attempts + 1));
+      return;
+    }
+    console.error('❌ Failed to bind server:', err.message || err);
+    process.exit(1);
+  };
+
+  server.once('error', onError);
+  server.listen(port, () => {
+    server.removeListener('error', onError);
+    console.log(`\n🚀 UrbanAV Server Running`);
+    console.log(`📡 Port: ${port}`);
+    console.log(`🌐 Environment: ${NODE_ENV}`);
+    console.log(`🔗 API URL: http://localhost:${port}`);
+    console.log(`📱 Client URL: ${process.env.CLIENT_URL || 'http://localhost:8081'}`);
+    console.log(`🔌 WebSocket: http://localhost:${port}`);
+    console.log('\n' + '='.repeat(50));
+  });
+}
+
+startListening(PORT);
