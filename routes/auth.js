@@ -9,6 +9,9 @@ const { protect } = require('../middleware/auth');
 const { uploadKyc, resolveKycUrl } = require('../middleware/upload');
 const { sendKycSubmissionNotification } = require('../services/emailService');
 
+// Firebase Web Client ID (for token verification)
+const FIREBASE_PROJECT_ID = 'urbanav-a36aee';
+
 // Google OAuth client IDs — accept tokens from any of our registered client IDs
 // (Web + Android + iOS) because Expo Auth Session issues the idToken with one of them.
 const GOOGLE_CLIENT_IDS = [
@@ -152,17 +155,13 @@ router.post('/google', async (req, res) => {
     if (!idToken) {
       return res.status(400).json({ success: false, message: 'Missing Google ID token' });
     }
-    if (GOOGLE_CLIENT_IDS.length === 0) {
-      console.error('[GoogleAuth] No GOOGLE_CLIENT_ID_* env vars configured on server!');
-      return res.status(500).json({
-        success: false,
-        message: 'Google OAuth is not configured on the server. Contact support.',
-      });
-    }
 
-    // Verify the idToken cryptographically against Google's published keys.
     let payload;
+
+    // Verify the idToken - works for both Firebase and Google OAuth tokens
+    // Firebase tokens are Google-signed JWTs, so the same verification works
     try {
+      console.log('[GoogleAuth] Verifying token (Firebase or Google OAuth)...');
       const ticket = await googleOAuthClient.verifyIdToken({
         idToken,
         audience: GOOGLE_CLIENT_IDS,
@@ -173,16 +172,16 @@ router.post('/google', async (req, res) => {
       console.error('[GoogleAuth] Token verification failed:', verifyErr.message);
       return res.status(401).json({
         success: false,
-        message: 'Invalid Google token',
+        message: 'Invalid token',
         error: verifyErr.message,
       });
     }
 
     if (!payload || !payload.email) {
-      return res.status(401).json({ success: false, message: 'Google token missing email' });
+      return res.status(401).json({ success: false, message: 'Token missing email' });
     }
     if (payload.email_verified === false) {
-      return res.status(403).json({ success: false, message: 'Google email is not verified' });
+      return res.status(403).json({ success: false, message: 'Email is not verified' });
     }
 
     const email = payload.email.toLowerCase().trim();
@@ -292,37 +291,6 @@ router.post('/login', async (req, res) => {
         success: false,
         message: 'Please provide email and password',
       });
-    }
-
-    // Demo credentials fallback (read from env — admin testing only)
-    const isDemoBuyer =
-      email === process.env.DEMO_BUYER_EMAIL &&
-      password === process.env.DEMO_BUYER_PASSWORD;
-    const isDemoSupplier =
-      email === process.env.DEMO_SUPPLIER_EMAIL &&
-      password === process.env.DEMO_SUPPLIER_PASSWORD;
-
-    if (isDemoBuyer) {
-      const demoUser = {
-        id: 'demo-buyer-id',
-        name: 'Demo Buyer',
-        email: process.env.DEMO_BUYER_EMAIL,
-        userType: 'buyer',
-        isVerified: true,
-      };
-      const token = jwt.sign({ id: demoUser.id }, process.env.JWT_SECRET, { expiresIn: '30d' });
-      return res.json({ success: true, token, user: demoUser });
-    }
-    if (isDemoSupplier) {
-      const demoUser = {
-        id: 'demo-supplier-id',
-        name: 'Demo Supplier',
-        email: process.env.DEMO_SUPPLIER_EMAIL,
-        userType: 'supplier',
-        isVerified: true,
-      };
-      const token = jwt.sign({ id: demoUser.id }, process.env.JWT_SECRET, { expiresIn: '30d' });
-      return res.json({ success: true, token, user: demoUser });
     }
 
     // Check for user in database
