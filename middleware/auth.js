@@ -19,7 +19,18 @@ exports.protect = async (req, res, next) => {
     
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      req.user = await User.findById(decoded.id).select('-password');
+      const user = await User.findById(decoded.id).select('-password');
+      if (!user) {
+        // Token signature is valid but the user no longer exists in the DB
+        // (deleted / wiped / seed reset). Return 401 so the client logs out
+        // gracefully instead of a 500 from downstream handlers.
+        return res.status(401).json({
+          success: false,
+          message: 'Account no longer exists. Please sign in again.',
+          code: 'USER_NOT_FOUND',
+        });
+      }
+      req.user = user;
       next();
     } catch (error) {
       return res.status(401).json({
