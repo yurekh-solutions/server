@@ -338,9 +338,22 @@ router.post('/login', async (req, res) => {
 
     const token = generateToken(user._id);
 
+    // Detect if this is the supplier's first login after admin approval
+    // so the client can show a "Welcome! Your account has been approved" popup.
+    const justApproved = user.userType === 'supplier' &&
+      user.kycStatus === 'approved' &&
+      (!user.lastLoginAt || new Date(user.lastLoginAt) < new Date(user.kycApprovedAt));
+
+    // Update lastLoginAt so we only show the popup once
+    if (justApproved) {
+      user.lastLoginAt = new Date();
+      await user.save();
+    }
+
     res.json({
       success: true,
       token,
+      justApproved,
       user: {
         id: user._id,
         email: user.email,

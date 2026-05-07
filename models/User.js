@@ -156,6 +156,9 @@ const userSchema = new mongoose.Schema({
   kycRejectedAt: Date,
   kycReviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   kycRejectionReason: String,
+  // Tracks the most recent login time. Used to detect first login after
+  // admin approval (so the client can show a "just approved" popup once).
+  lastLoginAt: Date,
   // Admin-controlled account state (separate from isVerified which tracks OTP).
   accountStatus: {
     type: String,
