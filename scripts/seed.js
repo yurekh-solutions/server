@@ -13,6 +13,9 @@ const suppliers = [
     userType: 'supplier',
     businessName: 'ProAV Solutions',
     businessDescription: 'Premium projectors, LED walls, and screens',
+    accountStatus: 'active',
+    kycStatus: 'approved',
+    isVerified: true,
   },
   {
     email: 'soundmaster@urbanav.com',
@@ -22,6 +25,9 @@ const suppliers = [
     userType: 'supplier',
     businessName: 'SoundMaster Events',
     businessDescription: 'Professional sound systems and microphones',
+    accountStatus: 'active',
+    kycStatus: 'approved',
+    isVerified: true,
   },
   {
     email: 'djpro@urbanav.com',
@@ -31,6 +37,9 @@ const suppliers = [
     userType: 'supplier',
     businessName: 'DJ Pro Rentals',
     businessDescription: 'DJ equipment and stage lighting',
+    accountStatus: 'active',
+    kycStatus: 'approved',
+    isVerified: true,
   },
   {
     email: 'techvision@urbanav.com',
@@ -40,6 +49,9 @@ const suppliers = [
     userType: 'supplier',
     businessName: 'TechVision',
     businessDescription: 'Video recording and cables & accessories',
+    accountStatus: 'active',
+    kycStatus: 'approved',
+    isVerified: true,
   },
   {
     email: 'buyer@test.com',
@@ -144,8 +156,13 @@ async function seedDatabase() {
     await Equipment.deleteMany({});
     console.log('🗑️  Cleared existing data');
 
-    // Create users
-    const createdUsers = await User.insertMany(suppliers);
+    // Create users ONE BY ONE to ensure pre-save hooks run (password hashing)
+    const createdUsers = [];
+    for (const userData of suppliers) {
+      const user = new User(userData);
+      await user.save();
+      createdUsers.push(user);
+    }
     console.log(`👤 Created ${createdUsers.length} users`);
 
     // Map suppliers

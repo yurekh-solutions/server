@@ -27,10 +27,12 @@ if (hasCloudinary) {
     cloudinary,
     params: async (req, file) => {
       const folder = req.uploadFolder || 'urbanav/misc';
+      const isPdf = /pdf/i.test(file.mimetype);
       return {
         folder,
-        allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
-        transformation: [{ quality: 'auto:good', fetch_format: 'auto' }],
+        resource_type: isPdf ? 'raw' : 'image',
+        allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'pdf'],
+        transformation: isPdf ? [] : [{ quality: 'auto:good', fetch_format: 'auto' }],
         public_id: `${Date.now()}-${file.originalname.split('.')[0].replace(/[^a-z0-9_-]/gi, '_')}`,
       };
     },
