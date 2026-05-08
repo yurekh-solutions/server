@@ -49,10 +49,14 @@ const equipmentSchema = new mongoose.Schema({
     type: String,
     default: [],
   }],
-  specs: [{
-    type: String,
+  // `specs` accepts either a legacy array of strings OR a JSON object with
+  // structured fields (e.g. { brand: 'Bose', wattage: 1000, channels: 2.1,
+  // resolution: '4K', dimensions: '...' }). Backward-compatible with existing
+  // array-of-strings data already in the database.
+  specs: {
+    type: mongoose.Schema.Types.Mixed,
     default: [],
-  }],
+  },
   tags: [{
     type: String,
     default: [],

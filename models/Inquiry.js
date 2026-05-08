@@ -30,6 +30,18 @@ const inquirySchema = new mongoose.Schema({
     default: 'pending',
   },
   quotedPrice: Number,
+  // Optional event window / delivery address captured on the quote so supplier
+  // can confirm specifics before buyer accepts. These mirror fields on the
+  // requirement but can be edited during negotiation.
+  eventStartDate: Date,
+  eventEndDate: Date,
+  quotedDeliveryAddress: {
+    street: String,
+    city: String,
+    state: String,
+    pincode: String,
+    instructions: String,
+  },
   counterHistory: [counterEntrySchema],
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },

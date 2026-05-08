@@ -53,6 +53,7 @@ const reviewRoutes = require('./routes/reviews');
 const uploadRoutes = require('./routes/upload');
 const addressRoutes = require('./routes/addresses');
 const adminRoutes = require('./routes/admin');
+const availabilityRoutes = require('./routes/availability');
 
 // Use routes
 app.use('/api/auth', authRoutes);
@@ -69,6 +70,7 @@ app.use('/api/reviews', reviewRoutes);
 app.use('/api/upload', uploadRoutes);
 app.use('/api/addresses', addressRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/availability', availabilityRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
