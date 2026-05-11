@@ -325,6 +325,7 @@ router.post('/login', async (req, res) => {
           success: false,
           message: 'Your account has been rejected. Contact support for more information.',
           code: 'ACCOUNT_REJECTED',
+          rejectionReason: user.kycRejectionReason || 'Your KYC application was rejected by the admin team.',
         });
       }
       if (user.accountStatus === 'suspended') {
