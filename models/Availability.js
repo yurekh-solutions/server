@@ -45,14 +45,13 @@ const availabilitySchema = new mongoose.Schema({
 });
 
 // Normalize date to 00:00:00 UTC so (vendor, date) pairs compare cleanly.
-availabilitySchema.pre('save', function (next) {
+availabilitySchema.pre('save', function () {
   if (this.date) {
     const d = new Date(this.date);
     d.setUTCHours(0, 0, 0, 0);
     this.date = d;
   }
   this.updatedAt = new Date();
-  next();
 });
 
 // One availability document per (vendor, date). Slots live inside it.

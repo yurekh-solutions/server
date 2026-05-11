@@ -546,7 +546,7 @@ router.get('/inquiries', async (req, res) => {
     // Map admin UI "open" → schema "pending"
     if (status && status !== 'all') {
       const mapped = status === 'open' ? 'pending' : status;
-      if (['pending', 'responded', 'accepted', 'rejected'].includes(mapped)) {
+      if (['pending', 'offered', 'responded', 'accepted', 'rejected'].includes(mapped)) {
         query.status = mapped;
       }
     }
@@ -606,6 +606,9 @@ router.get('/inquiries', async (req, res) => {
         : 'General inquiry',
       status: i.status === 'pending' ? 'open' : i.status,
       messageCount: (i.counterHistory || []).length,
+      offerPrice: i.offerPrice || null,
+      offerNote: i.offerNote || null,
+      isSelected: !!i.isSelected,
       createdAt: i.createdAt,
     }));
 
@@ -627,7 +630,7 @@ router.get('/requirements', async (req, res) => {
 
     const query = {};
     if (status && status !== 'all' &&
-        ['open', 'matched', 'booked', 'cancelled'].includes(String(status))) {
+        ['open', 'offered', 'matched', 'booked', 'cancelled'].includes(String(status))) {
       query.status = status;
     }
     if (eventType && eventType !== 'all') {
@@ -684,10 +687,42 @@ router.get('/requirements', async (req, res) => {
       notes: r.notes || '',
       status: r.status,
       inquiryCount: countMap.get(String(r._id)) || 0,
+      offersCount: r.offersCount || 0,
+      selectedInquiryId: r.selectedInquiryId || null,
+      selectedVendorId: r.selectedVendorId || null,
       createdAt: r.createdAt,
     }));
 
     res.json({ data, total, page, pageSize });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// GET /api/admin/requirements/:id/offers → offers for a requirement
+router.get('/requirements/:id/offers', async (req, res) => {
+  try {
+    const offers = await Inquiry.find({
+      requirementId: req.params.id,
+      offerPrice: { $exists: true, $ne: null },
+    })
+      .populate('supplierId', 'name email')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const mapped = offers.map((o) => ({
+      _id: o._id,
+      supplier: o.supplierId
+        ? { _id: o.supplierId._id, name: o.supplierId.name || 'Unknown' }
+        : null,
+      offerPrice: o.offerPrice,
+      offerNote: o.offerNote || '',
+      status: o.status,
+      isSelected: !!o.isSelected,
+      createdAt: o.createdAt,
+    }));
+
+    res.json({ offers: mapped });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }

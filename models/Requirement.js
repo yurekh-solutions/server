@@ -31,13 +31,15 @@ const requirementSchema = new mongoose.Schema({
     enum: ['open', 'matched', 'booked', 'cancelled'],
     default: 'open',
   },
+  offersCount: { type: Number, default: 0 },
+  selectedInquiryId: { type: mongoose.Schema.Types.ObjectId, ref: 'Inquiry' },
+  selectedVendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });
 
-requirementSchema.pre('save', function (next) {
+requirementSchema.pre('save', function () {
   this.updatedAt = new Date();
-  next();
 });
 
 module.exports = mongoose.model('Requirement', requirementSchema);

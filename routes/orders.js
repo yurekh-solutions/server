@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const Order = require('../models/Order');
 const Equipment = require('../models/Equipment');
 const User = require('../models/User');
@@ -251,6 +252,26 @@ router.put('/:id/status', protect, async (req, res) => {
 
     order.status = status;
     await order.save();
+
+    // Auto-generate OTPs when supplier confirms the order
+    if (status === 'confirmed' && !order.otpStart) {
+      order.otpStart = String(crypto.randomInt(100000, 999999));
+      order.otpEnd = String(crypto.randomInt(100000, 999999));
+      await order.save();
+
+      // Notify buyer that OTPs are ready
+      try {
+        await Notification.create({
+          userId: order.buyerId,
+          title: 'OTP Codes Ready',
+          message: `Your verification codes are ready for your order. Share the Start OTP with the supplier at the event.`,
+          type: 'order',
+          data: { orderId: order._id },
+        });
+      } catch (e) {
+        console.error('OTP notification failed:', e.message);
+      }
+    }
 
     // Notify buyer
     await Notification.create({

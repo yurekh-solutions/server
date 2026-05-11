@@ -8,7 +8,7 @@ const notificationSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['order_update', 'chat', 'payment', 'system', 'promotion'],
+    enum: ['order_update', 'chat', 'payment', 'system', 'promotion', 'inquiry'],
     required: true,
   },
   title: {
@@ -23,6 +23,8 @@ const notificationSchema = new mongoose.Schema({
     orderId: mongoose.Schema.Types.ObjectId,
     chatId: mongoose.Schema.Types.ObjectId,
     equipmentId: mongoose.Schema.Types.ObjectId,
+    inquiryId: mongoose.Schema.Types.ObjectId,
+    requirementId: mongoose.Schema.Types.ObjectId,
   },
   read: {
     type: Boolean,

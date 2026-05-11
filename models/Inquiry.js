@@ -26,7 +26,7 @@ const inquirySchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'responded', 'accepted', 'rejected'],
+    enum: ['pending', 'offered', 'responded', 'accepted', 'rejected'],
     default: 'pending',
   },
   quotedPrice: Number,
@@ -43,13 +43,15 @@ const inquirySchema = new mongoose.Schema({
     instructions: String,
   },
   counterHistory: [counterEntrySchema],
+  offerPrice: { type: Number },
+  offerNote: { type: String },
+  isSelected: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
 });
 
-inquirySchema.pre('save', function (next) {
+inquirySchema.pre('save', function () {
   this.updatedAt = new Date();
-  next();
 });
 
 module.exports = mongoose.model('Inquiry', inquirySchema);
