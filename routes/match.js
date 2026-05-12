@@ -4,6 +4,7 @@ const User = require('../models/User');
 const Equipment = require('../models/Equipment');
 const Requirement = require('../models/Requirement');
 const { protect } = require('../middleware/auth');
+const { calculatePincodeDistance, getDistanceCategory } = require('../utils/pincodeDistance');
 
 /** Haversine distance in km between two lat/lng points */
 function haversine(lat1, lng1, lat2, lng2) {
@@ -40,19 +41,33 @@ router.get('/', protect, async (req, res) => {
       'name businessName rating totalOrders address'
     );
 
+    // Get buyer's pincode from requirement
+    const buyerPincode = requirement.location?.pincode || requirement.pincode;
     const buyerLat = requirement.location?.lat;
     const buyerLng = requirement.location?.lng;
 
     const scored = suppliers.map((s) => {
       const sLat = s.address?.lat;
       const sLng = s.address?.lng;
+      const supplierPincode = s.address?.pincode || s.serviceArea?.pincode;
 
-      let distanceKm = 10; // city fallback
-      let mocked = true;
+      let distanceKm;
+      let distanceSource = 'unknown';
 
+      // Priority 1: Use GPS coordinates if both available (most accurate)
       if (buyerLat && buyerLng && sLat && sLng) {
         distanceKm = haversine(buyerLat, buyerLng, sLat, sLng);
-        mocked = false;
+        distanceSource = 'gps';
+      }
+      // Priority 2: Use pincode-based estimation
+      else if (buyerPincode && supplierPincode) {
+        distanceKm = calculatePincodeDistance(buyerPincode, supplierPincode);
+        distanceSource = 'pincode';
+      }
+      // Fallback: Default city distance
+      else {
+        distanceKm = 10;
+        distanceSource = 'fallback';
       }
 
       const rating = s.rating || 3.5;
@@ -73,10 +88,11 @@ router.get('/', protect, async (req, res) => {
         rating,
         totalOrders: s.totalOrders || 0,
         distanceKm: Math.round(distanceKm * 10) / 10,
+        distanceSource,
+        distanceCategory: getDistanceCategory(distanceKm),
         responseTimeMins,
         estimatedPrice,
         score: Math.round(score * 100) / 100,
-        mocked,
       };
     });
 

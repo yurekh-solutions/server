@@ -11,6 +11,7 @@ const requirementSchema = new mongoose.Schema({
     lng: Number,
     address: { type: String, required: true },
     city: String,
+    pincode: String,  // Indian postal code for distance calculation
   },
   eventType: {
     type: String,
