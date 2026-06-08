@@ -98,6 +98,10 @@ const userSchema = new mongoose.Schema({
     bankName: { type: String, default: '' },
     accountHolderName: { type: String, default: '' },
   },
+  // Razorpay Route — Linked Account for auto-settlement
+  razorpayAccountId: { type: String, default: '' },      // Razorpay linked account ID
+  razorpayFundAccountId: { type: String, default: '' },  // Fund account for bank payouts
+  settlementPreference: { type: String, default: 'auto' },
   // KYC Status
   kycStatus: {
     type: String,

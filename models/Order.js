@@ -58,6 +58,35 @@ const orderSchema = new mongoose.Schema({
     transactionId: String,
     paidAt: Date,
   },
+  // Razorpay payment tracking
+  razorpayOrderId: String,
+  razorpayPaymentId: String,
+  razorpaySignature: String,
+  // Settlement tracking (Escrow → Supplier payout)
+  settlementStatus: {
+    type: String,
+    enum: ['pending', 'processing', 'settled', 'failed'],
+    default: 'pending',
+  },
+  settlementAmount: { type: Number, default: 0 },       // Amount sent to supplier
+  platformCommission: { type: Number, default: 0 },     // Amount kept by platform
+  commissionPercent: { type: Number, default: 5 },      // Snapshot of rate at order time
+  settlementTransferId: String,                         // Razorpay transfer ID
+  settledAt: Date,
+  // Refund tracking
+  refundStatus: {
+    type: String,
+    enum: ['none', 'partial', 'full', 'processing', 'failed'],
+    default: 'none',
+  },
+  refundAmount: { type: Number, default: 0 },
+  refundId: String,
+  refundedAt: Date,
+  // Cancellation policy (snapshot per order)
+  cancellationPolicy: {
+    before48hrs: { type: Number, default: 100 },  // 100% refund
+    within48hrs: { type: Number, default: 50 },   // 50% refund
+  },
   // Delivery
   deliveryAddress: {
     street: String,
@@ -75,7 +104,7 @@ const orderSchema = new mongoose.Schema({
     type: String,
     default: '',
   },
-  // Advance payment (OTP trust layer)
+  // Payment amounts breakdown
   advanceAmount: { type: Number, default: 0 },
   advancePaid: { type: Boolean, default: false },
   balanceDue: { type: Number, default: 0 },

@@ -18,6 +18,7 @@ const Order = require('../models/Order');
 const Inquiry = require('../models/Inquiry');
 const Notification = require('../models/Notification');
 const Requirement = require('../models/Requirement');
+const razorpay = require('../config/razorpay');
 const {
   sendKycApprovalEmail,
   sendKycRejectionEmail,
@@ -869,6 +870,43 @@ router.put('/vendors/:id/approve', async (req, res) => {
     ).select('-password');
     if (!vendor) return res.status(404).json({ message: 'Vendor not found' });
 
+    // Create Razorpay Linked Account for settlement (Route feature)
+    if (razorpay && vendor.bankDetails?.accountNumber && vendor.bankDetails?.ifsc) {
+      try {
+        const linkedAccount = await razorpay.accounts.create({
+          email: vendor.email,
+          phone: vendor.phone || undefined,
+          legal_business_name: vendor.businessName || vendor.name,
+          business_type: 'individual',
+          legal_info: {
+            pan: vendor.panNumber || undefined,
+            gst: vendor.gstNumber || undefined,
+          },
+          profile: {
+            category: 'services',
+            subcategory: 'event_planning',
+            addresses: {
+              registered: {
+                street1: vendor.serviceArea?.fullAddress || vendor.address?.street || 'Address',
+                city: vendor.serviceArea?.city || vendor.address?.city || 'Mumbai',
+                state: vendor.serviceArea?.state || vendor.address?.state || 'Maharashtra',
+                postal_code: Number(vendor.serviceArea?.pincode || vendor.address?.pincode || '400001'),
+                country: 'IN',
+              },
+            },
+          },
+        });
+
+        // Save linked account ID
+        vendor.razorpayAccountId = linkedAccount.id;
+        await vendor.save();
+        console.log(`✅ Razorpay linked account created for ${vendor.businessName}: ${linkedAccount.id}`);
+      } catch (rzpErr) {
+        console.error('Razorpay linked account creation failed:', rzpErr.message);
+        // Non-blocking — vendor is still approved, settlement can be done manually
+      }
+    }
+
     // Create in-app notification
     await Notification.create({
       userId: vendor._id,
@@ -1104,6 +1142,94 @@ router.put('/disputes/:id', async (req, res) => {
     if (!order) return res.status(404).json({ message: 'Order not found' });
 
     res.json({ success: true, message: `Dispute resolved with action: ${action}`, order });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PAYMENT & SETTLEMENT STATS
+// ═══════════════════════════════════════════════════════════════════════════
+
+// GET /api/admin/stats/payments — Platform revenue, pending settlements, refund stats
+router.get('/stats/payments', async (req, res) => {
+  try {
+    const [commissionAgg, pendingSettlements, failedSettlements, refundAgg, totalPaid] = await Promise.all([
+      // Total platform commission earned
+      Order.aggregate([
+        { $match: { settlementStatus: 'settled' } },
+        { $group: { _id: null, total: { $sum: '$platformCommission' }, count: { $sum: 1 } } },
+      ]),
+      // Orders paid but not yet settled
+      Order.countDocuments({ paymentStatus: 'paid', settlementStatus: 'pending' }),
+      // Failed settlements needing attention
+      Order.countDocuments({ settlementStatus: 'failed' }),
+      // Total refunds processed
+      Order.aggregate([
+        { $match: { refundStatus: { $in: ['full', 'partial'] } } },
+        { $group: { _id: null, total: { $sum: '$refundAmount' }, count: { $sum: 1 } } },
+      ]),
+      // Total revenue collected
+      Order.aggregate([
+        { $match: { paymentStatus: 'paid' } },
+        { $group: { _id: null, total: { $sum: '$totalAmount' }, count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    res.json({
+      platformRevenue: commissionAgg[0]?.total || 0,
+      settledOrders: commissionAgg[0]?.count || 0,
+      totalCollected: totalPaid[0]?.total || 0,
+      totalPaidOrders: totalPaid[0]?.count || 0,
+      pendingSettlements,
+      failedSettlements,
+      totalRefunded: refundAgg[0]?.total || 0,
+      refundCount: refundAgg[0]?.count || 0,
+    });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// GET /api/admin/settlements — List settled/pending orders with amounts
+router.get('/settlements', async (req, res) => {
+  try {
+    const { status = 'all' } = req.query;
+    const { page, pageSize, skip } = pageParams(req);
+
+    const query = { paymentStatus: 'paid' };
+    if (status !== 'all' && ['pending', 'processing', 'settled', 'failed'].includes(status)) {
+      query.settlementStatus = status;
+    }
+
+    const [rows, total] = await Promise.all([
+      Order.find(query)
+        .populate('buyerId', 'name')
+        .populate('supplierId', 'name businessName razorpayAccountId')
+        .select('orderNumber totalAmount settlementAmount platformCommission commissionPercent settlementStatus settlementTransferId settledAt paymentStatus createdAt')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(pageSize)
+        .lean(),
+      Order.countDocuments(query),
+    ]);
+
+    const data = rows.map((o) => ({
+      _id: o._id,
+      orderNumber: o.orderNumber,
+      buyer: o.buyerId ? { _id: o.buyerId._id, name: o.buyerId.name } : null,
+      supplier: o.supplierId ? { _id: o.supplierId._id, name: o.supplierId.businessName || o.supplierId.name, hasLinkedAccount: !!o.supplierId.razorpayAccountId } : null,
+      totalAmount: o.totalAmount,
+      settlementAmount: o.settlementAmount || 0,
+      platformCommission: o.platformCommission || 0,
+      commissionPercent: o.commissionPercent || 5,
+      settlementStatus: o.settlementStatus || 'pending',
+      settlementTransferId: o.settlementTransferId || null,
+      settledAt: o.settledAt,
+      createdAt: o.createdAt,
+    }));
+
+    res.json({ data, total, page, pageSize });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }

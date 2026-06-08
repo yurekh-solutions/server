@@ -184,6 +184,75 @@ router.get('/supplier', protect, async (req, res) => {
   }
 });
 
+// @route   GET /api/orders/supplier/earnings
+// @desc    Get supplier's earnings summary with real settlement data
+router.get('/supplier/earnings', protect, async (req, res) => {
+  try {
+    const supplierId = req.user.id;
+    const orders = await Order.find({ supplierId, status: 'completed' })
+      .select('totalAmount settlementAmount platformCommission settlementStatus settledAt completedAt updatedAt createdAt orderNumber razorpayPaymentId commissionPercent')
+      .sort({ completedAt: -1 });
+
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - 7);
+
+    let totalEarnings = 0;
+    let monthEarnings = 0;
+    let weekEarnings = 0;
+    let pendingSettlement = 0;
+    let settledAmount = 0;
+    const recentOrders = [];
+
+    orders.forEach((o) => {
+      const settlementAmt = o.settlementAmount || Math.round((o.totalAmount || 0) * 0.95);
+      const when = new Date(o.completedAt || o.updatedAt || o.createdAt || 0);
+
+      if (o.settlementStatus === 'settled') {
+        totalEarnings += settlementAmt;
+        settledAmount += settlementAmt;
+        if (when >= monthStart) monthEarnings += settlementAmt;
+        if (when >= weekStart) weekEarnings += settlementAmt;
+      } else {
+        pendingSettlement += settlementAmt;
+        // Still count in total earnings since order is completed
+        totalEarnings += settlementAmt;
+        if (when >= monthStart) monthEarnings += settlementAmt;
+        if (when >= weekStart) weekEarnings += settlementAmt;
+      }
+
+      recentOrders.push({
+        _id: o._id,
+        orderNumber: o.orderNumber,
+        totalAmount: o.totalAmount,
+        settlementAmount: settlementAmt,
+        platformCommission: o.platformCommission || Math.round((o.totalAmount || 0) * 0.05),
+        commissionPercent: o.commissionPercent || 5,
+        settlementStatus: o.settlementStatus || 'pending',
+        settledAt: o.settledAt,
+        completedAt: o.completedAt || o.updatedAt,
+      });
+    });
+
+    res.json({
+      success: true,
+      earnings: {
+        totalEarnings,
+        monthEarnings,
+        weekEarnings,
+        pendingSettlement,
+        settledAmount,
+        completedCount: orders.length,
+        commissionPercent: Number(process.env.PLATFORM_COMMISSION_PERCENT) || 5,
+      },
+      orders: recentOrders,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+});
+
 // @route   GET /api/orders/:id
 // @desc    Get single order
 router.get('/:id', protect, async (req, res) => {
